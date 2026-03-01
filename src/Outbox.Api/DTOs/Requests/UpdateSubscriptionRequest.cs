@@ -5,5 +5,4 @@ public record UpdateSubscriptionRequest(
     bool? IsActive,
     string? Secret = null,
     int? MaxConcurrency = null
-    // string? SecretId = null       // optional: if you adopt key IDs
 );
