@@ -102,7 +102,7 @@ public class OutboxMessageRepository : IOutboxMessageRepository
             orderby message.CreatedAtUtc descending
             select message;
 
-        return messagesQuery.AsNoTracking().Skip(skip).Take(take).ToListAsync(ct);
+        return messagesQuery.Include(m => m.Deliveries).AsNoTracking().Skip(skip).Take(take).ToListAsync(ct);
     }
 
     public Task<List<OutboxMessage>> ListBySubjectAsync(string subjectKey, int skip, int take, CancellationToken ct = default)
@@ -113,7 +113,7 @@ public class OutboxMessageRepository : IOutboxMessageRepository
             orderby message.CreatedAtUtc descending
             select message;
 
-        return messagesQuery.AsNoTracking().Skip(skip).Take(take).ToListAsync(ct);
+        return messagesQuery.Include(m => m.Deliveries).AsNoTracking().Skip(skip).Take(take).ToListAsync(ct);
     }
 
 }
