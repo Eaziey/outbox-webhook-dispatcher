@@ -1,4 +1,5 @@
 # outbox-webhook-dispatcher
+
 A multi-tenant webhook delivery service built with **ASP.NET Core 8** and **SQLite**, implementing the [transactional outbox pattern](https://microservices.io/patterns/data/transactional-outbox.html) for reliable, at-least-once webhook delivery with automatic retries, exponential backoff, and HMAC request signing.
 
 ---
@@ -8,6 +9,7 @@ A multi-tenant webhook delivery service built with **ASP.NET Core 8** and **SQLi
 - [Overview](#overview)
 - [Features](#features)
 - [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
 - [Quick Start](#quick-start)
@@ -44,8 +46,7 @@ The system is **multi-tenant** — a single instance can serve multiple isolated
 - **Full audit trail** — every delivery attempt is recorded with status code, error, and timestamp
 - **Manual requeue** — dead or failed deliveries can be manually requeued via the API
 - **Secret rotation** — subscription secrets can be rotated without downtime
-- **Idempotency** — duplicate messages can be rejected using idempotency keys
-- **Extra headers** — custom headers can be forwarded with each webhook delivery
+- **Extra headers** — custom headers can be forwarded with each webhook delivery via `extraHeadersJson`
 
 ---
 
@@ -60,6 +61,31 @@ The system is **multi-tenant** — a single instance can serve multiple isolated
 | **HTTP Resilience** | Polly |
 | **Logging** | Serilog |
 | **API Docs** | Swagger / Swashbuckle |
+
+---
+
+## Project Structure
+```
+src/
+└── Outbox.Api/
+    ├── Controllers/          # REST API endpoints (Messages, Subscriptions, Deliveries, Attempts)
+    ├── Data/                 # EF Core DbContext and design-time factory
+    ├── DTOs/
+    │   ├── Requests/         # Incoming request models
+    │   └── Responses/        # Outgoing response models
+    ├── Entities/
+    │   └── Enums/            # DeliveryStatus enum
+    ├── Interfaces/
+    │   ├── IRepositories/    # Repository abstractions
+    │   └── IServices/        # Service abstractions
+    ├── Migrations/           # EF Core database migrations
+    ├── Options/              # Strongly-typed configuration (OutboxDispatcherOptions)
+    ├── Repositories/         # EF Core repository implementations
+    ├── Services/             # Background dispatcher and webhook sender (HMAC signing)
+    ├── Swagger/              # Swagger operation filters (tenant header)
+    ├── Tenancy/              # Tenant context, query extensions, HTTP and worker contexts
+    └── Utils/                # Shared utilities (e.g. string truncation)
+```
 
 ---
 
@@ -122,7 +148,7 @@ Content-Type: application/json
 }
 ```
 
-> If `secret` is omitted, one is auto-generated. Store it — you'll need it to verify incoming webhook signatures on the receiving end.
+> If `secret` is omitted, one is auto-generated. Store it — you will need it to verify incoming webhook signatures on the receiving end.
 
 ### Step 2 — Enqueue a message
 ```http
@@ -161,10 +187,10 @@ Every webhook delivery is an HTTP POST to the subscription endpoint with the fol
 | `X-Timestamp` | Unix timestamp of when the request was sent |
 | `X-Signature` | HMAC-SHA256 signature for verifying authenticity |
 | `X-Signature-Version` | Signature version (currently `v1`) |
-| `Idempotency-Key` | Unique key per message for deduplication on the receiver side |
+| `Idempotency-Key` | Auto-generated unique key per message for deduplication on the receiver side |
 | `Content-Type` | `application/json` |
 
-The request body is the raw JSON payload you provided when enqueuing the message.
+The request body is the raw JSON payload provided when enqueuing the message.
 
 ### Verifying the Signature
 
@@ -261,7 +287,7 @@ All dispatcher settings live in `appsettings.json` under `OutboxDispatcher`:
 | Setting | Default | Description |
 |---|---|---|
 | `LeaseBatchSize` | `50` | Max deliveries processed per loop iteration |
-| `LeaseDurationSeconds` | `300` | How long a delivery is leased before it can be retried |
+| `LeaseDurationSeconds` | `300` | How long a delivery is leased before it becomes eligible for retry |
 | `LoopDelayMilliseconds` | `2000` | Polling interval when no deliveries are pending |
 | `DefaultMaxAttempts` | `5` | Max attempts before a delivery is marked Dead |
 | `MaxBackoffSeconds` | `600` | Maximum delay cap between retries |
@@ -283,10 +309,11 @@ Tenant identity is caller-supplied via the `X-Tenant-Id` request header. All dat
 
 - **Fan-out happens at enqueue time** — only subscriptions that are active when a message is enqueued will receive a delivery. Reactivating a subscription does not retroactively deliver previously enqueued messages.
 - **Soft deletes** — deleting a subscription sets `isActive = false`. It is never physically removed from the database.
-- **Idempotency keys** — each message is assigned an auto-generated idempotency key. You can supply your own via `idempotencyKey` in the request body to prevent duplicate messages within the same tenant.
-- **Extra headers** — pass a JSON object as `extraHeadersJson` on a message to forward custom headers with every webhook delivery for that message.
+- **Idempotency keys** — each message is automatically assigned a unique idempotency key which is forwarded to the receiver as the `Idempotency-Key` header. This allows receivers to detect and deduplicate retried deliveries.
+- **Extra headers** — pass a valid JSON object as `extraHeadersJson` when enqueuing a message to forward custom headers with every webhook delivery for that message. Example: `"extraHeadersJson": "{\"X-Custom-Header\": \"value\"}"`.
 - **HTTPS only** — subscription endpoints must use HTTPS. HTTP endpoints are rejected with a `400` validation error.
-- **Lease mechanism** — the dispatcher uses `NextAttemptUtc` as a lease timestamp to prevent double-delivery in concurrent environments.
+- **Lease mechanism** — the dispatcher uses `NextAttemptUtc` as a lease timestamp to prevent double-delivery in concurrent environments. If a delivery is not completed within `LeaseDurationSeconds`, it becomes eligible for retry.
+- **Secret rotation** — use `POST /api/subscriptions/{id}/rotate-secret` to generate a new signing secret. Update your receiver to use the new secret immediately after rotating.
 
 ---
 
