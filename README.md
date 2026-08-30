@@ -31,22 +31,22 @@ When building event-driven systems, reliably delivering webhooks to external sub
 
 This project solves that by implementing the **transactional outbox pattern**: events are first persisted to a database, and a background dispatcher handles delivery independently. If delivery fails, the system retries automatically with exponential backoff. Every delivery attempt is tracked for full observability.
 
-The system is **multi-tenant** — a single instance can serve multiple isolated tenants, each with their own subscriptions and message history.
+The system is **multi-tenant**. A single instance can serve multiple isolated tenants, each with their own subscriptions and message history.
 
 ---
 
 ## Features
 
-- **Reliable delivery** — messages are persisted before dispatch; delivery is decoupled from the enqueue request
-- **Multi-tenancy** — all data is scoped per tenant via the `X-Tenant-Id` header
-- **Fan-out** — each enqueued message creates one delivery per active subscription in the tenant
-- **Automatic retries** — failed deliveries retry with exponential backoff up to a configurable maximum
-- **Per-subscription concurrency** — `MaxConcurrency` limits in-flight deliveries per subscription
-- **HMAC signing** — every webhook request is signed with `HMAC-SHA256`, allowing receivers to verify authenticity
-- **Full audit trail** — every delivery attempt is recorded with status code, error, and timestamp
-- **Manual requeue** — dead or failed deliveries can be manually requeued via the API
-- **Secret rotation** — subscription secrets can be rotated without downtime
-- **Extra headers** — custom headers can be forwarded with each webhook delivery via `extraHeadersJson`
+- **Reliable delivery** - messages are persisted before dispatch; delivery is decoupled from the enqueue request
+- **Multi-tenancy** - all data is scoped per tenant via the `X-Tenant-Id` header
+- **Fan-out** - each enqueued message creates one delivery per active subscription in the tenant
+- **Automatic retries** - failed deliveries retry with exponential backoff up to a configurable maximum
+- **Per-subscription concurrency** - `MaxConcurrency` limits in-flight deliveries per subscription
+- **HMAC signing** - every webhook request is signed with `HMAC-SHA256`, allowing receivers to verify authenticity
+- **Full audit trail** - every delivery attempt is recorded with status code, error, and timestamp
+- **Manual requeue** - dead or failed deliveries can be manually requeued via the API
+- **Secret rotation** - subscription secrets can be rotated without downtime
+- **Extra headers** - custom headers can be forwarded with each webhook delivery via `extraHeadersJson`
 
 ---
 
@@ -136,7 +136,7 @@ http://localhost:5157/swagger
 
 Every request requires the `X-Tenant-Id` header. You can use any string as a tenant identifier (e.g. `tenant-1`).
 
-### Step 1 — Create a subscription
+### Step 1 - Create a subscription
 ```http
 POST /api/subscriptions
 X-Tenant-Id: tenant-1
@@ -150,7 +150,7 @@ Content-Type: application/json
 
 > If `secret` is omitted, one is auto-generated. Store it — you will need it to verify incoming webhook signatures on the receiving end.
 
-### Step 2 — Enqueue a message
+### Step 2 - Enqueue a message
 ```http
 POST /api/messages
 X-Tenant-Id: tenant-1
@@ -165,7 +165,7 @@ Content-Type: application/json
 
 The background dispatcher picks this up within seconds and POSTs it to your endpoint.
 
-### Step 3 — Check delivery status
+### Step 3 - Check delivery status
 ```http
 GET /api/messages/{id}/deliveries
 X-Tenant-Id: tenant-1
@@ -301,23 +301,23 @@ So with defaults: 5s → 10s → 20s → 40s → 80s → capped at 600s.
 
 ## Multi-Tenancy
 
-Tenant identity is caller-supplied via the `X-Tenant-Id` request header. All data — messages, subscriptions, deliveries, and attempts — is fully isolated per tenant. The background dispatcher processes deliveries across all tenants. Tenant registration and management is intentionally out of scope; this service trusts whatever tenant ID is passed in.
+Tenant identity is caller-supplied via the `X-Tenant-Id` request header. All data ( messages, subscriptions, deliveries, and attempts) is fully isolated per tenant. The background dispatcher processes deliveries across all tenants. Tenant registration and management is intentionally out of scope; this service trusts whatever tenant ID is passed in.
 
 ---
 
 ## Important Behaviour Notes
 
-- **Fan-out happens at enqueue time** — only subscriptions that are active when a message is enqueued will receive a delivery. Reactivating a subscription does not retroactively deliver previously enqueued messages.
-- **Soft deletes** — deleting a subscription sets `isActive = false`. It is never physically removed from the database.
-- **Idempotency keys** — each message is automatically assigned a unique idempotency key which is forwarded to the receiver as the `Idempotency-Key` header. This allows receivers to detect and deduplicate retried deliveries.
-- **Extra headers** — pass a valid JSON object as `extraHeadersJson` when enqueuing a message to forward custom headers with every webhook delivery for that message. Example: `"extraHeadersJson": "{\"X-Custom-Header\": \"value\"}"`.
-- **HTTPS only** — subscription endpoints must use HTTPS. HTTP endpoints are rejected with a `400` validation error.
-- **Lease mechanism** — the dispatcher uses `NextAttemptUtc` as a lease timestamp to prevent double-delivery in concurrent environments. If a delivery is not completed within `LeaseDurationSeconds`, it becomes eligible for retry.
-- **Secret rotation** — use `POST /api/subscriptions/{id}/rotate-secret` to generate a new signing secret. Update your receiver to use the new secret immediately after rotating.
+- **Fan-out happens at enqueue time** - only subscriptions that are active when a message is enqueued will receive a delivery. Reactivating a subscription does not retroactively deliver previously enqueued messages.
+- **Soft deletes** - deleting a subscription sets `isActive = false`. It is never physically removed from the database.
+- **Idempotency keys** - each message is automatically assigned a unique idempotency key which is forwarded to the receiver as the `Idempotency-Key` header. This allows receivers to detect and deduplicate retried deliveries.
+- **Extra headers** - pass a valid JSON object as `extraHeadersJson` when enqueuing a message to forward custom headers with every webhook delivery for that message. Example: `"extraHeadersJson": "{\"X-Custom-Header\": \"value\"}"`.
+- **HTTPS only** - subscription endpoints must use HTTPS. HTTP endpoints are rejected with a `400` validation error.
+- **Lease mechanism** - the dispatcher uses `NextAttemptUtc` as a lease timestamp to prevent double-delivery in concurrent environments. If a delivery is not completed within `LeaseDurationSeconds`, it becomes eligible for retry.
+- **Secret rotation** - use `POST /api/subscriptions/{id}/rotate-secret` to generate a new signing secret. Update your receiver to use the new secret immediately after rotating.
 
 ---
 
-## Development — GitHub Codespaces
+## Development - GitHub Codespaces
 
 This repo includes a `.devcontainer` configuration. Opening it in GitHub Codespaces will automatically provision a .NET 8 environment with the EF Core CLI pre-installed. Then simply run:
 ```bash
