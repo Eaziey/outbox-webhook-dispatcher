@@ -19,7 +19,7 @@ A multi-tenant webhook delivery service built with **ASP.NET Core 8** and **SQLi
 - [Configuration](#configuration)
 - [Multi-Tenancy](#multi-tenancy)
 - [Important Behaviour Notes](#important-behaviour-notes)
-- [Development - GitHub Codespaces](#development--github-codespaces)
+- [Development - GitHub Codespaces](#development---github-codespaces)
 - [Health Check](#health-check)
 - [License](#license)
 
@@ -114,12 +114,14 @@ cd src/Outbox.Api
 dotnet restore
 ```
 
-### 3. Create the database
+### 3. Create the database (optional)
 ```bash
 dotnet ef database update
 ```
 
 This applies all migrations and creates `outbox.db` in the project directory.
+
+> The API applies pending migrations automatically on startup, so you can skip this and go straight to `dotnet run`. Run it explicitly when you want the database created ahead of time, or to inspect migrations before they are applied.
 
 ### 4. Run the API
 ```bash
@@ -188,6 +190,7 @@ Every webhook delivery is an HTTP POST to the subscription endpoint with the fol
 | `X-Timestamp` | Unix timestamp of when the request was sent |
 | `X-Signature` | HMAC-SHA256 signature for verifying authenticity |
 | `X-Signature-Version` | Signature version (currently `v1`) |
+| `X-Signature-Id` | Identifies which signing secret was used. Only sent when the message carries a signature secret id |
 | `Idempotency-Key` | Auto-generated unique key per message for deduplication on the receiver side |
 | `Content-Type` | `application/json` |
 
@@ -213,6 +216,8 @@ var isValid = expected == receivedSignature;
 ## API Reference
 
 All endpoints require the `X-Tenant-Id` header. Requests without it receive a `400 Bad Request`.
+
+**Pagination** - the list endpoints for messages, deliveries, and attempts accept `?skip=` and `?take=` (defaults `0` and `50`). A response of 50 items may not be the full set. Page through with `skip` to retrieve the rest.
 
 ### Subscriptions
 
@@ -253,9 +258,17 @@ All endpoints require the `X-Tenant-Id` header. Requests without it receive a `4
 ## Delivery Lifecycle
 ```
 Pending → Sending → Sent
-                 ↘ Failed → (retry with backoff) → Pending
-                          → Dead (max attempts reached)
+             │
+             ├→ Failed - (backoff elapses) → Sending (retry loop)
+             │      └────────────────────────→ Dead    (max attempts reached)
+             │
+             └─(lease expires, e.g. worker crash)─→ Sending
+
+Dead / Failed - (manual requeue) → Pending
 ```
+
+A failed delivery is re-leased directly from `Failed` - it does not return to `Pending`. The
+only paths back to `Pending` are the initial fan-out and a manual requeue.
 
 | Status | Value | Description |
 |---|---|---|
@@ -296,7 +309,9 @@ All dispatcher settings live in `appsettings.json` under `OutboxDispatcher`:
 
 Backoff delay formula: `min(MaxBackoffSeconds, 2^(attempt-1) * BackoffBaseSeconds)`
 
-So with defaults: 5s → 10s → 20s → 40s → 80s → capped at 600s.
+With the defaults, a delivery makes 5 attempts separated by four backoffs: **5s → 10s → 20s → 40s**, then it is marked `Dead`. Later steps in the sequence (80s, 160s, …) and the `MaxBackoffSeconds` cap only come into play if `DefaultMaxAttempts` is raised.
+
+Observed gaps run a few seconds longer than the nominal backoff, because the dispatcher only re-checks for due deliveries every `LoopDelayMilliseconds`.
 
 ---
 
@@ -323,9 +338,10 @@ Tenant identity is caller-supplied via the `X-Tenant-Id` request header. All dat
 This repo includes a `.devcontainer` configuration. Opening it in GitHub Codespaces will automatically provision a .NET 8 environment with the EF Core CLI pre-installed. Then simply run:
 ```bash
 cd src/Outbox.Api
-dotnet ef database update
 dotnet run
 ```
+
+Migrations are applied automatically on startup.
 
 ---
 
