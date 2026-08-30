@@ -11,7 +11,7 @@ public class DeliveryAttempt
     public string? Error { get; set; }
     public int AttemptNumber { get; set; }
     public int? DurationMs { get; set; }
-    public string? ResponseBody { get; set; } // consider truncating before saving
+    public string? ResponseBody { get; set; }
     public bool? ConsideredRetryable { get; set; }
     public string? TenantId { get; set; }
 

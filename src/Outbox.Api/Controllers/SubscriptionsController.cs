@@ -96,8 +96,6 @@ public class SubscriptionsController : ControllerBase
 
     }
 
-    
-// PUT: /api/subscriptions/{id}
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<SubscriptionResponse>> UpdateSubscription(Guid id, [FromBody] UpdateSubscriptionRequest request, CancellationToken ct)
     {
@@ -146,7 +144,6 @@ public class SubscriptionsController : ControllerBase
         return Ok(response);
     }
 
-    // POST: /api/subscriptions/{id}/rotate-secret
     [HttpPost("{id:guid}/rotate-secret")]
     public async Task<ActionResult> RotateSecret(Guid id, CancellationToken ct)
     {
@@ -160,7 +157,6 @@ public class SubscriptionsController : ControllerBase
         return NoContent();
     }
 
-    // DELETE: /api/subscriptions/{id}  (soft delete)
     [HttpDelete("{id:guid}")]
     public async Task<ActionResult> Deactivate(Guid id, CancellationToken ct)
     {

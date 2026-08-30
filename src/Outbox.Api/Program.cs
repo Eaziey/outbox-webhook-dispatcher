@@ -83,11 +83,11 @@ try
 
         if (httpContext != null)
         {
-            // We are in an HTTP request → use header-based tenant
+            // We are in an HTTP request - use header-based tenant
             return new HttpTenantContext(httpContextAccessor);
         }
 
-        // No HTTP context → Background service or other
+        // No HTTP context - Background service or other
         return new WorkerTenantContext(tenantId: null);
     });
 

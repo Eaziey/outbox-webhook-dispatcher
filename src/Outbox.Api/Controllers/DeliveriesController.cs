@@ -22,7 +22,6 @@ public class DeliveriesController : ControllerBase
         _tenant = tenant;
     }
 
-    // GET: /api/deliveries/{id}
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<object>> GetDeliveriesById(Guid id, CancellationToken ct)
     {
@@ -45,7 +44,6 @@ public class DeliveriesController : ControllerBase
         });
     }
 
-    // POST: /api/deliveries/{id}/requeue
     [HttpPost("{id:guid}/requeue")]
     public async Task<ActionResult> Requeue(Guid id, [FromBody] RequeueRequest request, CancellationToken ct){
         

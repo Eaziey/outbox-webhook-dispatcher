@@ -15,7 +15,6 @@ public class DeliveryAttemptsController : ControllerBase
         _attempts = attempts;
     }
 
-    // GET: /api/messages/{messageId}/attempts?skip=0&take=50
     [HttpGet("messages/{messageId:guid}/attempts")]
     public async Task<ActionResult<object>> GetAttemptByMessage(Guid messageId, [FromQuery] int skip = 0, [FromQuery] int take = 50, CancellationToken ct = default)
     {
@@ -35,7 +34,6 @@ public class DeliveryAttemptsController : ControllerBase
         )));
     }
 
-    // GET: /api/deliveries/{deliveryId}/attempts?skip=0&take=50
     [HttpGet("deliveries/{deliveryId:guid}/attempts")]
     public async Task<ActionResult<object>> GetAttemptByDelivery(Guid deliveryId,[FromQuery] int skip = 0, [FromQuery] int take = 50, CancellationToken ct = default)
     {
