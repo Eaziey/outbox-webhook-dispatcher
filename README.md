@@ -267,9 +267,6 @@ Pending → Sending → Sent
 Dead / Failed - (manual requeue) → Pending
 ```
 
-A failed delivery is re-leased directly from `Failed` - it does not return to `Pending`. The
-only paths back to `Pending` are the initial fan-out and a manual requeue.
-
 | Status | Value | Description |
 |---|---|---|
 | `Pending` | `0` | Waiting to be dispatched |
