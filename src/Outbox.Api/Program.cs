@@ -6,124 +6,147 @@ using Outbox.Api.Repositories;
 using Outbox.Api.Services;
 using Outbox.Api.Tenancy;
 using Outbox.Api.Swagger;
+using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-builder.Services.AddDbContext<AppDbContext>(options =>
+try
 {
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")
-        ?? "Data Source=outbox.db");
-});
+    var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHttpClient<IWebhookSender, WebhookSender>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(10);
-});
+    builder.Host.UseSerilog((context, services, configuration) => configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext());
 
-builder.Services.Configure<Outbox.Api.Options.OutboxDispatcherOptions>(
-    builder.Configuration.GetSection("OutboxDispatcher"));
-    
-// Repositories & UoW
-builder.Services.AddScoped<IOutboxMessageRepository, OutboxMessageRepository>();
-builder.Services.AddScoped<IOutboxDeliveryRepository, OutboxDeliveryRepository>();
-builder.Services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();
-builder.Services.AddScoped<IDeliveryAttemptRepository, DeliveryAttemptRepository>();
-builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
-
-// Services
-builder.Services.AddSingleton<IHmacSigner, HmacSigner>();
-
-// Background worker
-builder.Services.AddHostedService<OutboxDispatcherService>();
-
-builder.Services.AddControllers().AddJsonOptions(opt =>
-{
-    opt.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-    opt.JsonSerializerOptions.WriteIndented = true;
-});
-
-// Swagger
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.OperationFilter<TenantHeaderOperationFilter>();
-});
-builder.Services.AddHealthChecks();
-
-//Cors
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
+    builder.Services.AddDbContext<AppDbContext>(options =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")
+            ?? "Data Source=outbox.db");
     });
-});
 
-//Tenant
-builder.Services.AddHttpContextAccessor();
-
-builder.Services.AddScoped<ITenantContext>(sp =>
-{
-    var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
-    var httpContext = httpContextAccessor.HttpContext;
-
-    if (httpContext != null)
+    builder.Services.AddHttpClient<IWebhookSender, WebhookSender>(client =>
     {
-        // We are in an HTTP request → use header-based tenant
-        return new HttpTenantContext(httpContextAccessor);
-    }
+        client.Timeout = TimeSpan.FromSeconds(10);
+    });
 
-    // No HTTP context → Background service or other
-    return new WorkerTenantContext(tenantId: null);
-});
+    builder.Services.Configure<Outbox.Api.Options.OutboxDispatcherOptions>(
+        builder.Configuration.GetSection("OutboxDispatcher"));
 
+    // Repositories & UoW
+    builder.Services.AddScoped<IOutboxMessageRepository, OutboxMessageRepository>();
+    builder.Services.AddScoped<IOutboxDeliveryRepository, OutboxDeliveryRepository>();
+    builder.Services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();
+    builder.Services.AddScoped<IDeliveryAttemptRepository, DeliveryAttemptRepository>();
+    builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+    // Services
+    builder.Services.AddSingleton<IHmacSigner, HmacSigner>();
 
-var app = builder.Build();
+    // Background worker
+    builder.Services.AddHostedService<OutboxDispatcherService>();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
-app.UseCors();
-app.Use(async (ctx, next) =>
-{
-    var path = ctx.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
-
-    if (path.StartsWith("/swagger") || path.StartsWith("/health") || path.StartsWith("/favicon") || path.StartsWith("/assets"))
+    builder.Services.AddControllers().AddJsonOptions(opt =>
     {
-        await next();
-        return;
-    }
+        opt.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        opt.JsonSerializerOptions.WriteIndented = true;
+    });
 
-    var tenantId = ctx.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-
-    if (string.IsNullOrWhiteSpace(tenantId))
+    // Swagger
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen(c =>
     {
-        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
-        await ctx.Response.WriteAsJsonAsync(new
+        c.OperationFilter<TenantHeaderOperationFilter>();
+    });
+    builder.Services.AddHealthChecks();
+
+    //Cors
+    builder.Services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
         {
-            error = "tenant_required",
-            message = "Provide X-Tenant-Id header."
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
         });
-        return;
+    });
+
+    //Tenant
+    builder.Services.AddHttpContextAccessor();
+
+    builder.Services.AddScoped<ITenantContext>(sp =>
+    {
+        var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
+        var httpContext = httpContextAccessor.HttpContext;
+
+        if (httpContext != null)
+        {
+            // We are in an HTTP request → use header-based tenant
+            return new HttpTenantContext(httpContextAccessor);
+        }
+
+        // No HTTP context → Background service or other
+        return new WorkerTenantContext(tenantId: null);
+    });
+
+    var app = builder.Build();
+
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
     }
 
-    await next();
-});
-app.MapHealthChecks("/health");
-app.MapControllers();
+    // Before UseHttpsRedirection so redirects and the tenant short-circuit below are both logged.
+    app.UseSerilogRequestLogging();
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
+    app.UseHttpsRedirection();
+    app.UseCors();
+    app.Use(async (ctx, next) =>
+    {
+        var path = ctx.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
+
+        if (path.StartsWith("/swagger") || path.StartsWith("/health") || path.StartsWith("/favicon") || path.StartsWith("/assets"))
+        {
+            await next();
+            return;
+        }
+
+        var tenantId = ctx.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await ctx.Response.WriteAsJsonAsync(new
+            {
+                error = "tenant_required",
+                message = "Provide X-Tenant-Id header."
+            });
+            return;
+        }
+
+        await next();
+    });
+    app.MapHealthChecks("/health");
+    app.MapControllers();
+
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
+    }
+
+    await app.RunAsync();
 }
-
-await app.RunAsync();
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+    throw;
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}

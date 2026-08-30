@@ -58,8 +58,9 @@ The system is **multi-tenant**. A single instance can serve multiple isolated te
 | **Framework** | ASP.NET Core 8 |
 | **ORM** | Entity Framework Core 8 |
 | **Database** | SQLite |
-| **HTTP Resilience** | Polly |
-| **Logging** | Serilog |
+| **Delivery Resilience** | Durable exponential backoff persisted to the database, per-subscription attempt cap |
+| **Multi-tenancy** | Header-based isolation (`X-Tenant-Id`) |
+| **Logging** | Serilog (structured, console sink) |
 | **API Docs** | Swagger / Swashbuckle |
 
 ---
