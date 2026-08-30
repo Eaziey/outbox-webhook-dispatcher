@@ -19,7 +19,7 @@ A multi-tenant webhook delivery service built with **ASP.NET Core 8** and **SQLi
 - [Configuration](#configuration)
 - [Multi-Tenancy](#multi-tenancy)
 - [Important Behaviour Notes](#important-behaviour-notes)
-- [Development — GitHub Codespaces](#development--github-codespaces)
+- [Development - GitHub Codespaces](#development--github-codespaces)
 - [Health Check](#health-check)
 - [License](#license)
 
