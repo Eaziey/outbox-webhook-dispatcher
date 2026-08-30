@@ -32,7 +32,6 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
 
     public async Task<int> CreateDeliveriesForMessageAsync(OutboxMessage message, CancellationToken ct = default)
     {
-        // Create one delivery per active subscription in this tenant (HTTP scope filters by tenant)
         var activeSubscriptions = await _dbContext.Subscriptions
             .ForTenant(_tenant)
             .Where(s => s.IsActive)
@@ -47,7 +46,7 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
                 Status = DeliveryStatus.Pending,
                 AttemptCount = 0,
                 NextAttemptUtc = DateTime.UtcNow,
-                TenantId = message.TenantId,          // keep row-level tenant isolation
+                TenantId = message.TenantId,
                 SubjectKey = message.SubjectKey,
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow
@@ -63,12 +62,13 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
     {
         var nowUtc = DateTime.UtcNow;
 
-        // 1) Find due delivery candidates with active subscriptions (worker: all tenants; HTTP: filtered)
         var dueCandidatesQuery =
             from delivery in _dbContext.OutboxDeliveries.ForTenant(_tenant)
             join subscription in _dbContext.Subscriptions.ForTenant(_tenant)
                 on delivery.SubscriptionId equals subscription.Id
-            where (delivery.Status == DeliveryStatus.Pending || delivery.Status == DeliveryStatus.Failed)
+            where (delivery.Status == DeliveryStatus.Pending
+                   || delivery.Status == DeliveryStatus.Failed
+                   || delivery.Status == DeliveryStatus.Sending)
                   && delivery.NextAttemptUtc != null
                   && delivery.NextAttemptUtc <= nowUtc
                   && subscription.IsActive
@@ -76,13 +76,15 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
             select new { delivery, subscription };
 
         var candidatePairs = await dueCandidatesQuery
-            .Take(batchSize * 3) // overfetch to enforce per-subscription maxConcurrency
+            .AsNoTracking()
+            .Take(batchSize * 3)
             .ToListAsync(ct);
 
-        // 2) Current 'Sending' counts by subscription (enforce maxConcurrency)
         var sendingCounts = await _dbContext.OutboxDeliveries
             .ForTenant(_tenant)
-            .Where(d => d.Status == DeliveryStatus.Sending)
+            .Where(d => d.Status == DeliveryStatus.Sending
+                        && d.NextAttemptUtc != null
+                        && d.NextAttemptUtc > nowUtc)
             .GroupBy(d => d.SubscriptionId)
             .Select(g => new { SubscriptionId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.SubscriptionId, x => x.Count, ct);
@@ -96,7 +98,7 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
 
             if (maxConc.HasValue && currentSending >= maxConc.Value)
             {
-                continue; // capacity reached for this subscription
+                continue;
             }
 
             shortlist.Add(pair.delivery);
@@ -113,25 +115,23 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
             return Array.Empty<OutboxDelivery>();
         }
 
-        // 3) Lease (mark as Sending and push NextAttemptUtc forward as a lease-until time)
         var leaseUntilUtc = nowUtc.Add(leaseDuration);
         var leasedIds = new List<Guid>(shortlist.Count);
 
-        // We’ll lease each row with a concurrency predicate so only due & eligible rows transition to Sending
         await using var tx = await _dbContext.Database.BeginTransactionAsync(ct);
 
         foreach (var d in shortlist)
         {
-            // Build the base query with tenant visibility
             var candidate = _dbContext.OutboxDeliveries
                 .ForTenant(_tenant)
                 .Where(x => x.Id == d.Id)
                 .Where(x =>
-                    (x.Status == DeliveryStatus.Pending || x.Status == DeliveryStatus.Failed) &&
+                    (x.Status == DeliveryStatus.Pending
+                     || x.Status == DeliveryStatus.Failed
+                     || x.Status == DeliveryStatus.Sending) &&
                     x.NextAttemptUtc != null &&
                     x.NextAttemptUtc <= nowUtc);
 
-            // Execute atomic update; affected will be 1 if we successfully leased it
             var affected = await candidate.ExecuteUpdateAsync(updates => updates
                 .SetProperty(x => x.Status, DeliveryStatus.Sending)
                 .SetProperty(x => x.NextAttemptUtc, leaseUntilUtc)  // using NextAttemptUtc as a lease-until
@@ -150,7 +150,6 @@ public class OutboxDeliveryRepository : IOutboxDeliveryRepository
             return Array.Empty<OutboxDelivery>();
         }
 
-        // 4) Load the leased rows with includes for sending
         var leased = await _dbContext.OutboxDeliveries
             .Where(x => leasedIds.Contains(x.Id))
             .Include(d => d.Subscription)
